@@ -22,7 +22,7 @@ async function snapshot(dir: string): Promise<Record<string, string>> {
 }
 async function run(binary: string, args: string[], expected = 0) {
   const command = [binary, ...args]
-  const child = Bun.spawn(command, { cwd: root, env: { PATH: process.env.PATH, BUN_OPTIONS: '--no-env-file' }, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
+  const child = Bun.spawn(command, { cwd: root, env: { PATH: process.env.PATH }, stdout: 'pipe', stderr: 'pipe', timeout: 5000 })
   const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
   commands.push({ command, exit, stdout, stderr })
   if (exit !== expected) throw new Error(`Unexpected exit ${exit}: ${command.join(' ')}\n${stderr}`)

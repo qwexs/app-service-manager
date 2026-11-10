@@ -6,7 +6,7 @@
 - Configuration: sm.project.json, explicit absolute --root. Do not add production paths, secrets or hardcoded services.
 - Shared identity and path confinement live in packages/project. Never adopt unknown PIDs, kill ports or signal unowned processes.
 - Keep help, version and config validation independent of daemon, network and dotenv loading.
-- Checks: BUN_OPTIONS=--no-env-file bun test; bun run check:types; bun run build:native; bun run scripts/smoke.ts.
+- Checks: bun test; bun run check:types; bun run build:native; bun run scripts/smoke.ts.
 - Live daemon/Docker/updater/S3/deploy operations require explicit approval. Normal tests use mocks and disposable fixtures.
 - Never commit runtime data, credentials, local evidence, dist or node_modules. Review the exact staged tree before publication.
 - MIT applies to this project. Keep third-party notices; dependencies retain their licenses.

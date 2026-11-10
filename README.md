@@ -9,29 +9,29 @@ The compiled executables are `asm[.exe]` and `asm-updater[.exe]`. The internal u
 Install Bun 1.4.4. Docker Compose v2 is needed only for Compose services. A compiled application does not require Bun at runtime. There are no GitHub release downloads yet.
 
 ```sh
-BUN_OPTIONS=--no-env-file bun install --frozen-lockfile --ignore-scripts
-BUN_OPTIONS=--no-env-file bun run check:types
-BUN_OPTIONS=--no-env-file bun test
-BUN_OPTIONS=--no-env-file bun run build:native
-BUN_OPTIONS=--no-env-file bun run scripts/smoke.ts
+bun install --frozen-lockfile --ignore-scripts
+bun run check:types
+bun test
+bun run build:native
+bun run scripts/smoke.ts
 ```
 
 The native builder writes `asm`, `asm-updater` and `app/app` (with `.exe` on Windows) under `dist/<platform>/`. Supported platform labels are `linux-amd64`, `linux-arm64`, `windows-amd64`, `darwin-arm64`, and `darwin-amd64`; the builder builds for the current host, not by cross-compiling. Historical live runtime testing covered macOS arm64 only. See [verification](docs/verification.md) for the limits.
 
 ## Quick start
 
-Build first, then prepare a **new, disposable** runtime directory as described in the [Bun + Caddy example](examples/hello-caddy/README.md). That example uses Docker; the [Bun + MinIO example](examples/hello-minio/README.md) is another manual test, not an automatic test. With the binaries and manifest in place, run the following from the runtime directory:
+Build first, then prepare a **new, disposable** runtime directory as described in the [Bun + Caddy example](examples/hello-caddy/README.md). That example uses Docker; the [Bun + MinIO example](examples/hello-minio/README.md) is another manual test, not an automatic test. Add the absolute runtime directory containing `asm` and `asm-updater` to your `PATH` once (on Unix: `export PATH="/absolute/path/to/runtime:$PATH"`; on Windows, add it to the user Path). Keep both binaries in the runtime root for self-update. Then run:
 
 ```sh
-./asm --help
-./asm --version
-./asm --root /absolute/path/to/runtime config validate
-./asm --root /absolute/path/to/runtime daemon start
-./asm --root /absolute/path/to/runtime start all
-./asm --root /absolute/path/to/runtime status
-./asm --root /absolute/path/to/runtime logs app
-./asm --root /absolute/path/to/runtime stop all
-./asm --root /absolute/path/to/runtime daemon stop
+asm --help
+asm --version
+asm --root /absolute/path/to/runtime config validate
+asm --root /absolute/path/to/runtime daemon start
+asm --root /absolute/path/to/runtime start all
+asm --root /absolute/path/to/runtime status
+asm --root /absolute/path/to/runtime logs app
+asm --root /absolute/path/to/runtime stop all
+asm --root /absolute/path/to/runtime daemon stop
 ```
 
 Operational commands require an absolute `--root`. Help, version, and config validation do not start the daemon or services. The examples use Unix executable names; on Windows use `.exe`.
@@ -49,20 +49,20 @@ The daemon owns its child handles; it does not adopt PIDs, free occupied ports o
 `pack` accepts one already-built executable and creates a new output directory; it does not compile or verify the artifact architecture. One release directory contains one platform.
 
 ```sh
-./asm-updater pack --component app --artifact /absolute/path/to/app --version 0.1.0 --platform darwin-arm64 --out /absolute/path/to/new-app-release
-./asm-updater pack --component service-manager --artifact /absolute/path/to/asm --version 0.1.0 --platform darwin-arm64 --out /absolute/path/to/new-manager-release
+asm-updater pack --component app --artifact /absolute/path/to/app --version 0.1.0 --platform darwin-arm64 --out /absolute/path/to/new-app-release
+asm-updater pack --component service-manager --artifact /absolute/path/to/asm --version 0.1.0 --platform darwin-arm64 --out /absolute/path/to/new-manager-release
 ```
 
 Each contains `meta.json` and `<platform>.tar.gz`. The app archive contains only `app[.exe]` and `.version`; the manager archive contains only `asm[.exe]`. Previously prepared manager artifacts and self-update tasks using the old executable names are rejected; rebuild them for this baseline.
 
-To publish, configure `UPDATE_S3_ENDPOINT`, `UPDATE_S3_BUCKET`, `UPDATE_S3_ACCESS_KEY_ID`, and `UPDATE_S3_SECRET_ACCESS_KEY` in the environment. `UPDATE_S3_REGION` defaults to `us-east-1`; override it when your S3 provider requires another signing region. The default channel is `stable`. Automatic checks are off by default (`UPDATE_CHECK_INTERVAL=0`); the interval is in hours. Keep credentials out of the manifest and repository. The compiled runtime does not load `.env` automatically; use `BUN_OPTIONS=--no-env-file` for TypeScript commands.
+To publish, configure `UPDATE_S3_ENDPOINT`, `UPDATE_S3_BUCKET`, `UPDATE_S3_ACCESS_KEY_ID`, and `UPDATE_S3_SECRET_ACCESS_KEY` in the environment. `UPDATE_S3_REGION` defaults to `us-east-1`; override it when your S3 provider requires another signing region. The default channel is `stable`. Automatic checks are off by default (`UPDATE_CHECK_INTERVAL=0`); the interval is in hours. Keep credentials out of the manifest and repository. `bunfig.toml` disables automatic `.env` loading for repository commands. The compiled executables disable it at build time; supply credentials through the process environment.
 
 ```sh
-./asm-updater publish --release /absolute/path/to/new-app-release
-./asm --root /absolute/path/to/runtime update check
-./asm --root /absolute/path/to/runtime update app
-./asm --root /absolute/path/to/runtime update rollback
-./asm --root /absolute/path/to/runtime update self
+asm-updater publish --release /absolute/path/to/new-app-release
+asm --root /absolute/path/to/runtime update check
+asm --root /absolute/path/to/runtime update app
+asm --root /absolute/path/to/runtime update rollback
+asm --root /absolute/path/to/runtime update self
 ```
 
 These are operational commands, not part of the safe checks above. S3 publication is not atomic across objects; use one publisher per version. SHA-256 from the same storage verifies integrity, not authenticity. Live S3 publishing, app update, self-update and rollback require separate validation in an isolated environment. Update `asm-updater` manually as a matched pair with `asm`.

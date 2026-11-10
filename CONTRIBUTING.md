@@ -5,11 +5,11 @@ App Service Manager is experimental. Please describe the problem and intended sc
 Use Bun 1.4.4. From the repository root:
 
 ```sh
-BUN_OPTIONS=--no-env-file bun install --frozen-lockfile --ignore-scripts
-BUN_OPTIONS=--no-env-file bun run check:types
-BUN_OPTIONS=--no-env-file bun test
-BUN_OPTIONS=--no-env-file bun run build:native
-BUN_OPTIONS=--no-env-file bun run scripts/smoke.ts
+bun install --frozen-lockfile --ignore-scripts
+bun run check:types
+bun test
+bun run build:native
+bun run scripts/smoke.ts
 ```
 
 Tests should use temporary fixtures and mocks. Do not run live Docker, a daemon, S3 publishing or updates against existing resources as routine checks. For a manual test, use an isolated runtime and clean up only resources created for it. Keep help, version and config validation free of environment loading, network, IPC and process spawning. Preserve root confinement and never signal unknown processes.

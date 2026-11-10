@@ -125,7 +125,7 @@ test('publisher rejects path traversal and corrupt bytes offline, before S3 load
 const cli = resolve(import.meta.dir, '../src/cli.ts')
 async function command(args: string[]) {
   const child = Bun.spawn([process.execPath, '--no-env-file', cli, ...args], {
-    cwd: dir, env: { PATH: process.env.PATH, BUN_OPTIONS: '--no-env-file' }, stdout: 'pipe', stderr: 'pipe',
+    cwd: dir, env: { PATH: process.env.PATH }, stdout: 'pipe', stderr: 'pipe',
   })
   const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
   return { exit, stdout, stderr }
@@ -151,7 +151,7 @@ test('CLI pack produces a verifiable archive and import does not execute main', 
   expect(result.exit).toBe(0)
   expect((await readPackedRelease(input.out)).meta.platforms['darwin-arm64']?.binary).toBe('app')
   const child = Bun.spawn([process.execPath, '--no-env-file', '--eval', `await import(${JSON.stringify(cli)}); console.log('imported')`], {
-    cwd: dir, env: { PATH: process.env.PATH, BUN_OPTIONS: '--no-env-file' }, stdout: 'pipe', stderr: 'pipe',
+    cwd: dir, env: { PATH: process.env.PATH }, stdout: 'pipe', stderr: 'pipe',
   })
   expect(await child.exited).toBe(0)
   expect(await new Response(child.stdout).text()).toBe('imported\n')

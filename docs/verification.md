@@ -12,6 +12,14 @@ Local validation after the `asm` / `asm-updater` rename on macOS arm64, Bun 1.4.
 - Compiled CLI checks and two offline release packs passed.
 - Unix and Windows manager task/metadata names are covered offline, including rejection of the old executable names. This is not a Windows runtime test.
 
+## Environment configuration validation
+
+After moving the repository dotenv policy into `bunfig.toml`, local checks on macOS arm64 with Bun 1.4.4 passed without `BUN_OPTIONS`:
+
+- 193 tests passed, including a subprocess check that `bun --eval`, `bun run` and `bun test` ignore fixture dotenv files while preserving explicit process environment variables.
+- Typecheck, frozen dependency installation, native builds and compiled CLI / offline pack smoke passed.
+- Compiled executables still disable dotenv loading at build time, independently of the repository config.
+
 ## Historical baseline
 
 Before the public binary rename, the local suite had **191 passing tests**. A historical live test on macOS arm64 with Bun 1.4.4 exercised a compiled app and a disposable MinIO Compose dependency, including object write/read, app restart and shutdown. It did not verify live release publishing, app update, self-update or rollback. These results precede the public branding changes and are not results of a new run.
@@ -21,11 +29,11 @@ Before the public binary rename, the local suite had **191 passing tests**. A hi
 With Bun 1.4.4, from the repository root:
 
 ```sh
-BUN_OPTIONS=--no-env-file bun install --frozen-lockfile --ignore-scripts
-BUN_OPTIONS=--no-env-file bun run check:types
-BUN_OPTIONS=--no-env-file bun test
-BUN_OPTIONS=--no-env-file bun run build:native
-BUN_OPTIONS=--no-env-file bun run scripts/smoke.ts
+bun install --frozen-lockfile --ignore-scripts
+bun run check:types
+bun test
+bun run build:native
+bun run scripts/smoke.ts
 ```
 
 Tests use temporary fixtures and mocks. The native smoke checks compiled CLI exit codes and fixture filesystem nonmutation, and packs local artifacts offline. It is not a system-call audit and does not prove absence of file reads, network access or spawned processes. The early CLI's deferred-import boundary and instrumented unit tests provide separate coverage for no spawn/network on help, version and config validation.

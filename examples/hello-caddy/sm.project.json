@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "hello-caddy",
+  "services": [
+    {
+      "name": "app",
+      "type": "bun",
+      "cwd": "app",
+      "executable": "app",
+      "port": 18081,
+      "healthCheck": { "type": "http", "url": "http://127.0.0.1:18081/health" }
+    },
+    {
+      "name": "caddy",
+      "type": "docker-compose",
+      "cwd": ".",
+      "composeFile": "compose.yaml",
+      "services": ["caddy"],
+      "dependsOn": ["app"]
+    }
+  ]
+}

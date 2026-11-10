@@ -1,0 +1,13 @@
+{
+  "name": "@asm/updater",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@sm/s3-client": "workspace:*"
+  },
+  "license": "MIT"
+}

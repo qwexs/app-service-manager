@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+minio.env
+mc.env
+runtime-config.json
+.pids/
+.sock/
+.logs/
+.update/
+*-data/
+.releases/
+
+# Local extraction and validation evidence (retained locally, not public source).
+docs/evidence/
+docs/source-inventory.json
+docs/live-minio-2026-11-10.md
+.DS_Store
+graft/
+.graft/

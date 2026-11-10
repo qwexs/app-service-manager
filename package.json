@@ -1,0 +1,35 @@
+{
+  "name": "app-service-manager",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check:types": "tsc --noEmit",
+    "test": "bun test",
+    "build:native": "bun run scripts/native-build.ts --target native",
+    "pack": "bun run apps/sm-updater/src/cli.ts pack"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  },
+  "description": "A small service manager for compiled Bun apps and Docker Compose dependencies.",
+  "license": "MIT",
+  "author": "Sergey Pastukhov",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qwexs/app-service-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qwexs/app-service-manager/issues"
+  },
+  "homepage": "https://github.com/qwexs/app-service-manager#readme",
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "packageManager": "bun@1.4.4"
+}

@@ -1,0 +1,7 @@
+{
+  "port": 18181,
+  "endpoint": "http://127.0.0.1:19000",
+  "accessKeyId": "REPLACE_WITH_RANDOM_USER",
+  "secretAccessKey": "REPLACE_WITH_RANDOM_PASSWORD",
+  "bucket": "sm-live-test"
+}

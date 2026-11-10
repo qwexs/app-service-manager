@@ -1,0 +1,8 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    command: ["caddy", "reverse-proxy", "--from", ":80", "--to", "host.docker.internal:18081"]
+    ports:
+      - "127.0.0.1:18080:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "hello-minio",
+  "services": [
+    {
+      "name": "minio",
+      "type": "docker-compose",
+      "cwd": ".",
+      "composeFile": "compose.yaml",
+      "services": [
+        "minio"
+      ],
+      "healthCheck": {
+        "type": "http",
+        "url": "http://127.0.0.1:19000/minio/health/ready"
+      }
+    },
+    {
+      "name": "app",
+      "type": "bun",
+      "cwd": "app",
+      "executable": "app",
+      "port": 18181,
+      "dependsOn": [
+        "minio"
+      ],
+      "healthCheck": {
+        "type": "http",
+        "url": "http://127.0.0.1:18181/health"
+      }
+    }
+  ]
+}

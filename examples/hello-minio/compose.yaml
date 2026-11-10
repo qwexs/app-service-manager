@@ -1,0 +1,12 @@
+services:
+  minio:
+    image: minio/minio@sha256:d249d1fb6966de4d8ad26c04754b545205ff15a62e4fd19ebd0f26fa5baacbc0
+    pull_policy: never
+    command: ["server", "/data", "--console-address", ":9001"]
+    env_file: ["minio.env"]
+    ports:
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+    tmpfs:
+      - /data:size=128m
+    restart: "no"

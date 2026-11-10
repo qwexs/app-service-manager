@@ -105,7 +105,7 @@ test('paused app commit excludes restart and dependency start; prior mutation bl
   let commitEntered!: () => void, finishCommit!: () => void
   const entered = new Promise<void>((resolve) => { commitEntered = resolve })
   const finish = new Promise<void>((resolve) => { finishCommit = resolve })
-  const stage = spyOn(UpdateService.prototype, 'stageUpdate').mockResolvedValue({ success: true, staged: {} as any })
+  const stage = spyOn(UpdateService.prototype, 'stageUpdate').mockResolvedValue({ success: true, staged: { platformInfo: { binary: 'app' } } as any })
   const commit = spyOn(UpdateService.prototype, 'commitStaged').mockImplementation(async () => {
     commitEntered(); await finish
     return { success: true, component: 'app', oldVersion: '0.1.0', newVersion: '0.1.1' } as any
@@ -118,7 +118,7 @@ test('paused app commit excludes restart and dependency start; prior mutation bl
   Object.assign(process.env, { UPDATE_S3_ENDPOINT: 'http://unused', UPDATE_S3_BUCKET: 'fixture', UPDATE_S3_ACCESS_KEY_ID: 'fixture', UPDATE_S3_SECRET_ACCESS_KEY: 'fixture' })
   try {
     const update = dispatcher.dispatch(createRequest('update.install', { components: ['app'] }))
-    await entered
+    await Promise.race([entered, update.then((result) => { throw new Error(`Update ended before commit: ${JSON.stringify(result)}`) })])
     expect(supervisor.isPending('app')).toBe(true)
     for (const [method, names] of [['restart', ['app']], ['start', ['proxy']], ['stop', ['app']]] as const) {
       const result = await dispatcher.dispatch(createRequest(method, { services: [...names] }))
@@ -137,6 +137,7 @@ test('paused app commit excludes restart and dependency start; prior mutation bl
     expect(stage).toHaveBeenCalledTimes(1)
     unlock(); await active
   } finally {
+    finishCommit()
     stage.mockRestore(); commit.mockRestore(); discard.mockRestore(); stop.mockRestore(); start.mockRestore(); restart.mockRestore()
     for (const name of Object.keys(process.env)) if (!(name in env)) delete process.env[name]
     Object.assign(process.env, env)

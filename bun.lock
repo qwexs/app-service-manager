@@ -11,11 +11,11 @@
     },
     "apps/service-manager": {
       "name": "@asm/manager",
-      "version": "0.1.0",
+      "version": "0.2.0",
     },
     "apps/sm-updater": {
       "name": "@asm/updater",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@sm/s3-client": "workspace:*",
       },

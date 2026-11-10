@@ -1,7 +1,8 @@
-// Offline packaging accepts one ready-built executable, never a source tree.
+// Offline packaging accepts ready-built executables or the explicit directory release layout.
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { computeSha256 } from './archive'
+import { releaseBinary, validateArchiveNames } from '../../../packages/project/src/release'
 import type { ComponentName, Platform, UpdateChannel, VersionMeta, S3Config, LatestInfo, Manifest, ChannelInfo } from './types'
 
 const platforms: Platform[] = ['linux-amd64', 'linux-arm64', 'windows-amd64', 'darwin-arm64', 'darwin-amd64']
@@ -17,6 +18,64 @@ export interface PackArtifactOptions {
   out: string
   channel?: UpdateChannel
   changelog?: string
+}
+
+export interface PackDirectoryOptions extends Omit<PackArtifactOptions, 'artifact'> {
+  directory: string
+  executable: string
+}
+
+export async function packDirectory(options: PackDirectoryOptions): Promise<VersionMeta> {
+  const { component, version, platform, changelog } = options
+  const channel = options.channel ?? 'stable'
+  validateIdentity(component, version, platform, channel)
+  if (component !== 'app') throw new Error('Directory releases support only the app component')
+  const directory = absolutePath(options.directory, 'Directory')
+  const out = absolutePath(options.out, 'Output')
+  if (!(await lstat(directory)).isDirectory()) throw new Error('Directory must be a directory, not a symlink')
+  const meta: VersionMeta = {
+    component, version, channel, releasedAt: new Date().toISOString(), layout: 'directory-v1',
+    minServiceManagerVersion: '0.2.0', preservePaths: ['.env'],
+    ...(changelog === undefined ? {} : { changelog }),
+    platforms: { [platform]: { binary: options.executable } as VersionMeta['platforms'][Platform] },
+    ...(platform === 'windows-amd64' ? {} : { postInstall: { chmod: [options.executable] } }),
+  }
+  const binary = releaseBinary(meta, platform)
+  const members: Record<string, Uint8Array> = {}
+  async function visit(relative: string): Promise<void> {
+    const path = join(directory, relative)
+    const stat = await lstat(path)
+    if (stat.isDirectory()) {
+      if (relative !== 'web' && !relative.startsWith('web/')) throw new Error(`Unsupported source entry: ${relative}`)
+      for (const name of (await readdir(path)).sort()) await visit(`${relative}/${name}`)
+    } else if (stat.isFile()) {
+      if (relative === '.env') return // Inspect the entry type, never its bytes.
+      if (relative !== binary && !relative.startsWith('web/')) throw new Error(`Unsupported source entry: ${relative}`)
+      members[relative] = await readFile(path)
+    } else throw new Error(`Expected a regular source entry: ${relative}`)
+  }
+  for (const name of (await readdir(directory)).sort()) await visit(name)
+  members['.version'] = new TextEncoder().encode(`${version}\n`)
+  validateArchiveNames(meta, platform, Object.keys(members))
+  if (!members[binary]?.length) throw new Error('Artifact must not be empty')
+  const archive = await new Bun.Archive(members, { compress: 'gzip' }).bytes()
+  const { readDirectoryArchive } = await import('../../service-manager/src/update/archive')
+  const entries = await readDirectoryArchive(archive)
+  validateArchiveNames(meta, platform, entries.map((entry) => entry.name))
+  meta.platforms[platform] = {
+    archive: `${platform}.tar.gz`, archiveSize: archive.length,
+    archiveSha256: computeSha256(archive), binarySha256: computeSha256(members[binary]!),
+    extractedSize: Object.values(members).reduce((sum, data) => sum + data.length, 0), binary,
+  }
+  await mkdir(out)
+  try {
+    await writeFile(join(out, `${platform}.tar.gz`), archive, { flag: 'wx' })
+    await writeFile(join(out, 'meta.json'), JSON.stringify(meta, null, 2) + '\n', { flag: 'wx' })
+  } catch (error) {
+    await rm(out, { recursive: true, force: true })
+    throw error
+  }
+  return meta
 }
 
 function validateIdentity(component: unknown, version: unknown, platform: unknown, channel: unknown): void {
@@ -106,16 +165,20 @@ export async function readPackedRelease(release: string): Promise<{ meta: Versio
   if (!(await lstat(dir)).isDirectory()) throw new Error('Release must be a directory, not a symlink')
   const value: unknown = JSON.parse((await regularFile(join(dir, 'meta.json'))).toString())
   if (!record(value) || !record(value.platforms)) throw new Error('Invalid release metadata')
-  onlyKeys(value, ['component', 'version', 'channel', 'releasedAt', 'changelog', 'platforms', 'preservePaths', 'postInstall'])
+  onlyKeys(value, ['component', 'version', 'channel', 'releasedAt', 'changelog', 'platforms', 'preservePaths', 'postInstall', 'layout', 'minServiceManagerVersion'])
   const entries = Object.entries(value.platforms)
   if (entries.length !== 1) throw new Error('Packed release must contain exactly one platform')
   const [platform, info] = entries[0]!
   validateIdentity(value.component, value.version, platform, value.channel)
   if (!record(info)) throw new Error('Invalid platform metadata')
   onlyKeys(info, ['archive', 'archiveSize', 'archiveSha256', 'binarySha256', 'extractedSize', 'binary'])
-  const binary = binaryName(value.component as ComponentName, platform as Platform)
+  let binary: string
+  try { binary = releaseBinary(value as unknown as VersionMeta, platform as Platform) }
+  catch { throw new Error('Unsafe release metadata') }
+  const directoryLayout = value.layout === 'directory-v1'
   if (info.archive !== `${platform}.tar.gz` || info.binary !== binary
-    || JSON.stringify(value.preservePaths) !== '[]'
+    || JSON.stringify(value.preservePaths) !== JSON.stringify(directoryLayout ? ['.env'] : [])
+    || (directoryLayout ? value.minServiceManagerVersion !== '0.2.0' : value.minServiceManagerVersion !== undefined)
     || (value.changelog !== undefined && typeof value.changelog !== 'string')
     || typeof value.releasedAt !== 'string' || !Number.isFinite(Date.parse(value.releasedAt))) {
     throw new Error('Unsafe release metadata')
@@ -128,16 +191,21 @@ export async function readPackedRelease(release: string): Promise<{ meta: Versio
   }
   const archive = await regularFile(join(dir, info.archive as string))
   if (info.archiveSize !== archive.length || info.archiveSha256 !== computeSha256(archive)) throw new Error('Archive hash/size mismatch')
+  if (directoryLayout) {
+    // Bun's file map can normalize or omit non-file tar records. Inspect the
+    // original records before trusting that map.
+    const { readDirectoryArchive } = await import('../../service-manager/src/update/archive')
+    const entries = await readDirectoryArchive(archive)
+    validateArchiveNames(value as unknown as VersionMeta, platform as Platform, entries.map((entry) => entry.name))
+  }
   const files = await new Bun.Archive(archive).files()
-  const expectedNames = value.component === 'app' ? ['.version', binary].sort() : [binary]
-  if (JSON.stringify([...files.keys()].sort()) !== JSON.stringify(expectedNames)) throw new Error('Unexpected archive members')
+  validateArchiveNames(value as unknown as VersionMeta, platform as Platform, files.keys())
   const binaryBytes = new Uint8Array(await files.get(binary)!.arrayBuffer())
   if (!binaryBytes.length || info.binarySha256 !== computeSha256(binaryBytes)) throw new Error('Binary hash mismatch')
-  let extractedSize = binaryBytes.length
+  const extractedSize = [...files.values()].reduce((sum, file) => sum + file.size, 0)
   if (value.component === 'app') {
     const marker = files.get('.version')!
     if (await marker.text() !== `${value.version}\n`) throw new Error('Version marker mismatch')
-    extractedSize += marker.size
   }
   if (info.extractedSize !== extractedSize) throw new Error('Extracted size mismatch')
   return { meta: value as unknown as VersionMeta, archive, platform: platform as Platform }

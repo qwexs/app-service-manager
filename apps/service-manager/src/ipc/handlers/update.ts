@@ -4,6 +4,7 @@ import type { UpdateCheckParams, UpdateCheckResult, UpdateInstallParams, UpdateI
 import { UpdateService } from '../../update/service'
 import { parseUpdateConfig } from '../../update/config'
 import { APP_VERSION } from '../../version'
+import type { BunServiceConfig } from '../../types'
 import { validateComponent } from '../../update/metadata'
 
 let inProgress = false
@@ -31,6 +32,8 @@ export async function handleUpdateInstall(params: UpdateInstallParams | undefine
   try {
     staged = await updater.stageUpdate('app', params?.version)
     if (!staged.success) return { success: false, requiresRestart: false, components: [{ name: 'app', status: 'failed', error: staged.result.error }] }
+    const appConfig = manager.getService('app')?.config as BunServiceConfig | undefined
+    if (!appConfig || appConfig.type !== 'bun' || appConfig.cwd !== 'app' || appConfig.executable !== staged.staged.platformInfo.binary) throw new Error('Бинарник релиза не совпадает с настроенным app executable')
     supervisor?.beginPending(['app'])
     await manager.stopStrict(['app'])
     const result = await updater.commitStaged(staged.staged)
@@ -58,7 +61,8 @@ export async function handleUpdateRollback(params: UpdateRollbackParams, context
     supervisor?.beginPending(['app'])
     const updater = await service(context.rootDir)
     await manager.stopStrict(['app'])
-    const result = await updater.rollback('app')
+    const appConfig = manager.getService('app')?.config as BunServiceConfig | undefined
+    const result = await updater.rollback('app', appConfig?.executable)
     if (!result.success) throw new Error(result.error)
     await manager.start(['app'])
     supervisor?.adoptService('app')

@@ -1,14 +1,16 @@
 // UpdateService — бизнес-логика обновления компонентов
 // Координирует проверку, скачивание и установку обновлений
 
-import { chmod, mkdir, rename, rm } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { constants } from 'node:fs'
+import { validateArchiveNames } from '../../../../packages/project/src/release'
 
 import type { UpdateConfig } from './config'
 import { validateComponent, validateMeta, validateVersion } from './metadata'
 import { confinedPath } from '../../../../packages/project/src'
 import { UpdateRepository, RepositoryError } from './repository'
-import { extractFileFromTarGz, extractTarGzToDir, preserveFiles, restoreFiles, computeSha256 } from './archive'
+import { extractTarGzToDir, readDirectoryArchive, computeSha256 } from './archive'
 import {
   getBackupPath,
   getComponentDir,
@@ -56,7 +58,7 @@ export interface StagedUpdate {
     archiveSha256: string
     binarySha256?: string
   }
-  preserved: Map<string, Uint8Array> | null
+  directory: boolean
   chmodFiles?: string[]
   downloadPath?: string
 }
@@ -72,11 +74,35 @@ interface InstallMarker {
   archiveSha256: string
   binarySha256?: string
   installedAt: string
+  layout?: 'directory-v1'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UpdateService
 // ─────────────────────────────────────────────────────────────────────────────
+
+async function readCurrentEnv(dir: string): Promise<Uint8Array | null> {
+  const file = path.join(dir, '.env')
+  let handle
+  try {
+    const entry = await lstat(file)
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('.env должен быть обычным файлом')
+    handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    if (!(await handle.stat()).isFile()) throw new Error('.env должен быть обычным файлом')
+    return await handle.readFile()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  } finally { await handle?.close() }
+}
+
+async function writePrivateEnv(dir: string, content: Uint8Array): Promise<void> {
+  const file = path.join(dir, '.env')
+  // A backup may contain an old config or a symlink; never follow it.
+  await rm(file, { force: true })
+  await writeFile(file, content, { mode: 0o600, flag: 'wx' })
+  await chmod(file, 0o600)
+}
 
 export class UpdateService {
   private readonly repo: UpdateRepository
@@ -256,17 +282,30 @@ export class UpdateService {
         await rm(stagingPath, { recursive: true, force: true })
       }
 
-      let preserved: Map<string, Uint8Array> | null = null
-      if (meta.preservePaths && meta.preservePaths.length > 0) {
-        preserved = await preserveFiles(componentDir, meta.preservePaths)
-      }
-
       onProgress?.({ component, step: 'extracting', progress: 0, message: 'Распаковка...' })
-
-      await mkdir(stagingPath, { recursive: true })
-      await extractTarGzToDir(archivePath, stagingPath)
-      const stagedBinary = Bun.file(path.join(stagingPath, platformInfo.binary))
-      if (!(await stagedBinary.exists()) || computeSha256(await stagedBinary.bytes()) !== platformInfo.binarySha256) throw new Error('SHA256 binary не совпадает до замены')
+      if (meta.layout === 'directory-v1') {
+        const compressed = await Bun.file(archivePath).bytes()
+        if (compressed.byteLength !== platformInfo.archiveSize) throw new Error('Размер архива не совпадает')
+        const entries = await readDirectoryArchive(compressed)
+        validateArchiveNames(meta, platform, entries.map((entry) => entry.name))
+        const total = entries.reduce((sum, entry) => sum + entry.data!.byteLength, 0)
+        if (total !== platformInfo.extractedSize) throw new Error('Размер содержимого не совпадает')
+        const binary = entries.find((entry) => entry.name === platformInfo.binary)!.data!
+        const versionData = entries.find((entry) => entry.name === '.version')!.data!
+        if (![targetVersion, targetVersion + '\n'].includes(new TextDecoder('utf-8', { fatal: true }).decode(versionData))) throw new Error('Версия архива не совпадает')
+        if (computeSha256(binary).toLowerCase() !== platformInfo.binarySha256!.toLowerCase()) throw new Error('SHA256 binary не совпадает до замены')
+        await mkdir(stagingPath, { recursive: true })
+        for (const entry of entries) {
+          const filePath = confinedPath(stagingPath, entry.name)
+          await mkdir(path.dirname(filePath), { recursive: true })
+          await writeFile(filePath, entry.data!)
+        }
+      } else {
+        await mkdir(stagingPath, { recursive: true })
+        await extractTarGzToDir(archivePath, stagingPath)
+        const stagedBinary = Bun.file(path.join(stagingPath, platformInfo.binary))
+        if (!(await stagedBinary.exists()) || computeSha256(await stagedBinary.bytes()).toLowerCase() !== platformInfo.binarySha256!.toLowerCase()) throw new Error('SHA256 binary не совпадает до замены')
+      }
       const destPath = componentDir
 
       if (downloadPath) {
@@ -291,7 +330,7 @@ export class UpdateService {
             archiveSha256: platformInfo.archiveSha256,
             binarySha256: platformInfo.binarySha256,
           },
-          preserved,
+          directory: meta.layout === 'directory-v1',
           chmodFiles,
         },
       }
@@ -315,12 +354,10 @@ export class UpdateService {
     onProgress?.({ component, step: 'installing', progress: 0, message: 'Создание бэкапа...' })
     onProgress?.({ component, step: 'installing', progress: 50, message: 'Установка...' })
 
+    const preserved = staged.directory ? await readCurrentEnv(staged.componentDir) : null
+    if (preserved) await writePrivateEnv(staged.stagingPath, preserved)
     await replacePath(staged.stagingPath, staged.destPath, staged.backupPath, staged.prevPath)
     staged.stagingPath = ''
-
-    if (staged.preserved && staged.preserved.size > 0) {
-      await restoreFiles(staged.componentDir, staged.preserved)
-    }
 
     if (staged.chmodFiles && process.platform !== 'win32') {
       for (const file of staged.chmodFiles) {
@@ -336,7 +373,7 @@ export class UpdateService {
       throw new Error(`После установки не найден бинарник ${staged.platformInfo.binary}`)
     }
     const installedBinarySha256 = computeSha256(new Uint8Array(await installedBinary.arrayBuffer()))
-    if (staged.platformInfo.binarySha256 && installedBinarySha256 !== staged.platformInfo.binarySha256) {
+    if (staged.platformInfo.binarySha256 && installedBinarySha256.toLowerCase() !== staged.platformInfo.binarySha256.toLowerCase()) {
       throw new Error(`Контрольная сумма бинарника ${staged.platformInfo.binary} не совпадает с метаданными релиза`)
     }
 
@@ -346,6 +383,7 @@ export class UpdateService {
         archiveSha256: staged.platformInfo.archiveSha256,
         binarySha256: installedBinarySha256,
         installedAt: new Date().toISOString(),
+        ...(staged.directory ? { layout: 'directory-v1' as const } : {}),
       }
       const markerPath = path.join(staged.componentDir, '.release.json')
       const markerTempPath = `${markerPath}.tmp-${process.pid}`
@@ -397,7 +435,7 @@ export class UpdateService {
   /**
    * Откатывает компонент к предыдущей версии из бэкапа
    */
-  async rollback(component: ComponentName): Promise<InstallResult> {
+  async rollback(component: ComponentName, executable?: string): Promise<InstallResult> {
     validateComponent(component)
     if (component !== 'app') throw new Error('Rollback service-manager только через updater')
     const componentDir = confinedPath(this.rootDir, component)
@@ -408,14 +446,37 @@ export class UpdateService {
     }
 
     try {
-      const destPath = componentDir
-
-      if (await pathExists(destPath)) {
-        await rm(destPath, { recursive: true, force: true })
+      const backupStat = await lstat(backupPath)
+      if (!backupStat.isDirectory() || backupStat.isSymbolicLink()) throw new Error('Неверный бэкап')
+      let directory = false
+      try {
+        const marker = JSON.parse(await Bun.file(path.join(componentDir, '.release.json')).text())
+        directory = marker.layout === 'directory-v1'
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }
-
-      await rename(backupPath, destPath)
-
+      const preserved = directory ? await readCurrentEnv(componentDir) : null
+      if (directory) {
+        if (!executable || !/^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.exe)?$/.test(executable)) throw new Error('Не задан executable для проверки бэкапа')
+        for (const relative of [executable, 'web/index.html']) {
+          const entry = await lstat(confinedPath(backupPath, relative))
+          if (!entry.isFile() || entry.isSymbolicLink()) throw new Error('Неверный бэкап')
+        }
+        const version = await lstat(path.join(backupPath, '.version'))
+        if (!version.isFile() || version.isSymbolicLink()) throw new Error('Неверный бэкап')
+        validateVersion((await Bun.file(path.join(backupPath, '.version')).text()).trim())
+        if (preserved) await writePrivateEnv(backupPath, preserved)
+        else await rm(path.join(backupPath, '.env'), { force: true })
+      }
+      const temporary = path.join(this.rootDir, `.app-rollback-${process.pid}`)
+      try { await lstat(temporary); throw new Error('Rollback временный путь занят') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      const hasCurrent = await pathExists(componentDir)
+      if (hasCurrent) await rename(componentDir, temporary)
+      try { await rename(backupPath, componentDir) } catch (error) {
+        if (hasCurrent) await rename(temporary, componentDir)
+        throw error
+      }
+      if (hasCurrent) await rm(temporary, { recursive: true, force: true })
       return { success: true, component }
     } catch (error) {
       return { success: false, component, error: (error as Error).message }

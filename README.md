@@ -1,6 +1,6 @@
 # App Service Manager
 
-App Service Manager (`asm`) manages compiled Bun applications and explicitly configured Docker Compose services. Version **0.1.0 is experimental**; it is not a production-ready installer or deployment system.
+App Service Manager (`asm`) manages compiled Bun applications and explicitly configured Docker Compose services. Version **0.2.0 is experimental**; it is not a production-ready installer or deployment system.
 
 The compiled executables are `asm[.exe]` and `asm-updater[.exe]`. The internal update component key remains `service-manager`; it is not the executable name. Configuration remains `sm.project.json`, and existing `SM_*` environment names are unchanged.
 
@@ -46,7 +46,7 @@ The daemon owns its child handles; it does not adopt PIDs, free occupied ports o
 
 ## Offline releases and updates
 
-`pack` accepts one already-built executable and creates a new output directory; it does not compile or verify the artifact architecture. One release directory contains one platform.
+`pack` accepts an already-built executable or an app directory and creates a new output directory; it does not compile or verify the artifact architecture. One release directory contains one platform. `--artifact` keeps the existing single-binary format.
 
 ```sh
 asm-updater pack --component app --artifact /absolute/path/to/app --version 0.1.0 --platform darwin-arm64 --out /absolute/path/to/new-app-release
@@ -54,6 +54,16 @@ asm-updater pack --component service-manager --artifact /absolute/path/to/asm --
 ```
 
 Each contains `meta.json` and `<platform>.tar.gz`. The app archive contains only `app[.exe]` and `.version`; the manager archive contains only `asm[.exe]`. Previously prepared manager artifacts and self-update tasks using the old executable names are rejected; rebuild them for this baseline.
+
+For a compiled server with web assets, use the explicit directory format (requires ASM 0.2.0 or later):
+
+```sh
+asm-updater pack --component app --directory /absolute/path/to/dist --executable server --version 0.2.0 --platform linux-amd64 --out /absolute/path/to/new-directory-release
+```
+
+The source must contain the named executable and `web/index.html`; `web/` may contain regular files and directories. Use `server.exe` on Windows. The executable must be a safe leaf name. This format packages only the executable, a generated `.version`, and web files. A regular root `.env` is omitted without reading its contents; symlinks, special files, source `.version`, and other root entries are rejected. `--directory` and `--artifact` are mutually exclusive; directory releases support only `app`. Directory archives use regular USTAR file records only; paths requiring PAX or GNU extensions are rejected before output creation. Both formats are validated again before publication.
+
+Directory releases declare `layout: "directory-v1"`, `minServiceManagerVersion: "0.2.0"` and `preservePaths: [".env"]`. Configure the reserved app service's relative executable to match (for example `app/server`). Supply runtime configuration in the existing app directory's regular `.env`; incoming archives cannot contain it. The manager preserves that file through directory update and rollback. Do not use this release format with older managers.
 
 To publish, configure `UPDATE_S3_ENDPOINT`, `UPDATE_S3_BUCKET`, `UPDATE_S3_ACCESS_KEY_ID`, and `UPDATE_S3_SECRET_ACCESS_KEY` in the environment. `UPDATE_S3_REGION` defaults to `us-east-1`; override it when your S3 provider requires another signing region. The default channel is `stable`. Automatic checks are off by default (`UPDATE_CHECK_INTERVAL=0`); the interval is in hours. Keep credentials out of the manifest and repository. `bunfig.toml` disables automatic `.env` loading for repository commands. The compiled executables disable it at build time; supply credentials through the process environment.
 
@@ -67,7 +77,7 @@ asm --root /absolute/path/to/runtime update self
 
 These are operational commands, not part of the safe checks above. S3 publication is not atomic across objects; use one publisher per version. SHA-256 from the same storage verifies integrity, not authenticity. Live S3 publishing, app update, self-update and rollback require separate validation in an isolated environment. Update `asm-updater` manually as a matched pair with `asm`.
 
-**App update replaces the app directory.** Runtime data and configuration inside it are not preserved. Keep them outside that directory and supply their location through the app's own supported configuration or manifest arguments. Rollback does not roll back external data. On uncertain failure, investigate and recover manually; do not signal unverified PIDs.
+**App update replaces the app directory.** Single-binary releases preserve no runtime files. Directory releases preserve only the existing regular root `.env`; all other runtime data and configuration must live outside that directory, with their location supplied through the app's own supported configuration or manifest arguments. Rollback does not roll back external data. On uncertain failure, investigate and recover manually; do not signal unverified PIDs.
 
 There is no systemd installer, automatic credentials bootstrap, TLS provisioning, database migration, or production deployment workflow. See [provenance](docs/provenance.md), [verification](docs/verification.md), and [security](SECURITY.md).
 

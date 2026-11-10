@@ -9,6 +9,7 @@ function help(): void {
 Usage:
   asm-updater --root <dir>                  Run the prepared self-update task
   asm-updater pack --component <name> --artifact <absolute-file> --version <semver> --platform <platform> --out <new-absolute-dir> [--channel <channel>] [--changelog <text>]
+  asm-updater pack --component app --directory <absolute-dir> --executable <leaf-name> --version <semver> --platform <platform> --out <new-absolute-dir>
   asm-updater publish --release <absolute-packed-dir>
   asm-updater --help | --version
 
@@ -35,16 +36,21 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
   }
   if (args[0] === 'pack') {
     const { values } = parseArgs({ args: args.slice(1), options: {
-      component: { type: 'string' }, artifact: { type: 'string' }, version: { type: 'string' },
+      component: { type: 'string' }, artifact: { type: 'string' }, directory: { type: 'string' }, executable: { type: 'string' }, version: { type: 'string' },
       platform: { type: 'string' }, out: { type: 'string' }, channel: { type: 'string' }, changelog: { type: 'string' },
     }, strict: true, allowPositionals: false })
-    for (const key of ['component', 'artifact', 'version', 'platform', 'out'] as const) {
+    for (const key of ['component', 'version', 'platform', 'out'] as const) {
       if (!values[key]) throw new Error(`Missing --${key}`)
     }
-    const { packArtifact } = await import('./publish')
-    await packArtifact({ component: values.component as ComponentName, artifact: values.artifact!,
+    if (!!values.artifact === !!values.directory) throw new Error('Specify exactly one of --artifact or --directory')
+    if (values.directory && !values.executable) throw new Error('Directory pack requires --executable')
+    if (values.artifact && values.executable !== undefined) throw new Error('--executable requires --directory')
+    const { packArtifact, packDirectory } = await import('./publish')
+    const common = { component: values.component as ComponentName,
       version: values.version!, platform: values.platform as Platform, out: values.out!,
-      channel: values.channel as UpdateChannel | undefined, changelog: values.changelog })
+      channel: values.channel as UpdateChannel | undefined, changelog: values.changelog }
+    if (values.directory) await packDirectory({ ...common, directory: values.directory, executable: values.executable! })
+    else await packArtifact({ ...common, artifact: values.artifact! })
     console.log(`Packed release: ${values.out}`)
     return
   }

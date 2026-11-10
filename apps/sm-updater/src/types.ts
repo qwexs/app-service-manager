@@ -74,6 +74,8 @@ export interface PlatformInfo {
 }
 
 export interface VersionMeta {
+  layout?: 'directory-v1'
+  minServiceManagerVersion?: string
   component: ComponentName
   version: string
   channel: UpdateChannel

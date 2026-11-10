@@ -45,7 +45,7 @@ export function parseProject(value: unknown, rootDir: string): ProjectConfig {
       confinedPath(identity.rootDir, s.executable)
       const executable = process.platform === 'win32' && !s.executable.endsWith('.exe') ? `${s.executable}.exe` : s.executable
       confinedPath(identity.rootDir, `${s.cwd}/${executable}`)
-      if (s.name === 'app' && (s.cwd !== 'app' || !['app', 'app.exe'].includes(executable))) throw new Error('Обновляемый app должен быть app/app[.exe]')
+      if (s.name === 'app' && (s.cwd !== 'app' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}(?:\.exe)?$/.test(executable))) throw new Error('Обновляемый app должен иметь cwd app и безопасное имя executable')
       return { ...s, executable } as unknown as BunServiceConfig
     }
     if (s.type === 'docker-compose') {

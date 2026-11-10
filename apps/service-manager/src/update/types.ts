@@ -68,6 +68,7 @@ export interface PlatformInfo {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface VersionMeta {
+  layout?: 'directory-v1'
   component: ComponentName
   version: string
   channel: UpdateChannel
